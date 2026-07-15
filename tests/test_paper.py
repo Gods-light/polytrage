@@ -18,9 +18,12 @@ def test_fill_math_and_caps():
     # depth cap: smallest displayed size wins
     f2 = book.on_tick(_tick(2.0, [0.36, 0.33, 0.33], [5, 60, 90], short_baskets=40))
     assert f2 is not None and f2.baskets == 5
-    # position cap
-    book.fills[0].baskets = 99
-    assert book.on_tick(_tick(3.0, [0.36, 0.33, 0.33], [40, 60, 90], 40)).baskets <= 1
+    # position cap: 30 + 5 filled, force position to 99 -> only 1 basket of room
+    book.fills[0].baskets = 94
+    f3 = book.on_tick(_tick(3.0, [0.36, 0.33, 0.33], [40, 60, 90], 40))
+    assert f3 is not None and f3.baskets == 1
+    # at cap: no further fills
+    assert book.on_tick(_tick(4.0, [0.36, 0.33, 0.33], [40, 60, 90], 40)) is None
 
 
 def test_no_fill_when_no_arb_or_missing_bid():
