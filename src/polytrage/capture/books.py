@@ -54,12 +54,18 @@ class Book:
         return None
 
 
-def sweep_baskets(books: list[Book], side: str, max_baskets: float = 1e9) -> tuple[float, float]:
+def sweep_baskets(books: list[Book], side: str, max_baskets: float = 1e9,
+                  handicap: float = 0.0) -> tuple[float, float]:
     """Jointly walk every leg's ladder and return (baskets, edge_dollars).
 
     side="long":  consume asks; profitable while sum of current level
-                  prices < 1; edge per basket = 1 - sum.
-    side="short": consume bids; profitable while sum > 1; edge = sum - 1.
+                  prices < 1 - handicap; edge per basket = 1 - handicap - sum.
+    side="short": consume bids; profitable while sum > 1 + handicap.
+
+    `handicap` prices in costs outside the captured legs — for long arb on
+    events with excluded dead outcomes, pass their tail sum (a true basket
+    must buy every outcome). Short readings are left unhandicapped by the
+    callers (tails only improve them), keeping them conservative.
 
     A "basket" is one unit of every leg. Returns total executable baskets
     and total gross edge in dollars, both 0.0 if the top of book is not
@@ -79,7 +85,7 @@ def sweep_baskets(books: list[Book], side: str, max_baskets: float = 1e9) -> tup
     while baskets < max_baskets:
         prices = [ladders[i][idx[i]][0] for i in range(len(ladders))]
         s = sum(prices)
-        gap = (1.0 - s) if side == "long" else (s - 1.0)
+        gap = (1.0 - handicap - s) if side == "long" else (s - 1.0 - handicap)
         if gap <= 0:
             break
         q = min(min(rem), max_baskets - baskets)
@@ -99,8 +105,12 @@ def sweep_baskets(books: list[Book], side: str, max_baskets: float = 1e9) -> tup
     return baskets, edge
 
 
-def tick_metrics(books: list[Book]) -> dict | None:
-    """One measurement row across all legs; None until every leg has a book."""
+def tick_metrics(books: list[Book], long_handicap: float = 0.0) -> dict | None:
+    """One measurement row across all legs; None until every leg has a book.
+
+    long_handicap: dead-tail sum priced into the long-arb executability
+    condition (see sweep_baskets). Shorts stay unhandicapped/conservative.
+    """
     tops = []
     for b in books:
         bb, ba = b.best_bid, b.best_ask
@@ -115,7 +125,7 @@ def tick_metrics(books: list[Book]) -> dict | None:
     sum_mid = sum(t["mid"] for t in tops)
     sum_ask = sum(t["ba"] for t in tops) if all(t["ba"] is not None for t in tops) else None
     sum_bid = sum(t["bb"] for t in tops) if all(t["bb"] is not None for t in tops) else None
-    long_b, long_e = sweep_baskets(books, "long") if sum_ask is not None else (0.0, 0.0)
+    long_b, long_e = sweep_baskets(books, "long", handicap=long_handicap) if sum_ask is not None else (0.0, 0.0)
     short_b, short_e = sweep_baskets(books, "short") if sum_bid is not None else (0.0, 0.0)
     return {
         "sum_mid": round(sum_mid, 5),

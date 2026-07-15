@@ -88,3 +88,20 @@ def test_tick_metrics_sums_and_executables():
     assert m["short_baskets"] == 40             # capped by leg1 bid size
     assert abs(m["long_edge"] - 50 * 0.01) < 1e-6
     assert abs(m["short_edge"] - 40 * 0.02) < 1e-6
+
+
+def test_sweep_long_handicap_prices_in_dead_tail():
+    # asks sum 0.97; with a 2c tail handicap only 1c edge remains; with 4c none
+    books = [_book([], [(0.35, 100)]), _book([], [(0.32, 100)]), _book([], [(0.30, 100)])]
+    baskets, edge = sweep_baskets(books, "long", handicap=0.02)
+    assert baskets == 100 and abs(edge - 100 * 0.01) < 1e-9
+    assert sweep_baskets(books, "long", handicap=0.04) == (0.0, 0.0)
+
+
+def test_tick_metrics_long_handicap_kills_artifact_arb():
+    books = [_book([(0.36, 40)], [(0.37, 100)]),
+             _book([(0.33, 60)], [(0.34, 50)]),
+             _book([(0.33, 90)], [(0.28, 200)])]
+    m = tick_metrics(books, long_handicap=0.02)   # tail 2c > 1c raw edge
+    assert m is not None and m["long_baskets"] == 0.0
+    assert m["short_baskets"] == 40               # shorts stay conservative/unchanged

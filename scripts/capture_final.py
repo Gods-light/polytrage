@@ -40,9 +40,15 @@ def _get(url: str) -> list | dict:
         return json.load(r)
 
 
-def live_yes_tokens(event: dict, min_p: float = 0.001) -> list[str]:
-    """YES token of every market whose price isn't pinned to 0/1."""
-    out = []
+def live_yes_tokens(event: dict, min_p: float = 0.001) -> tuple[list[str], float, int]:
+    """(live tokens, sum of excluded dead-outcome prices, dead count).
+
+    The dead tail matters: a TRUE long-arb basket buys EVERY outcome, so
+    sums over live legs undercount cost by ~tail. Recorded as a meta row.
+    """
+    out: list[str] = []
+    tail = 0.0
+    dead = 0
     for m in event.get("markets", []):
         try:
             prices = json.loads(m["outcomePrices"]) if isinstance(m["outcomePrices"], str) else m["outcomePrices"]
@@ -52,7 +58,10 @@ def live_yes_tokens(event: dict, min_p: float = 0.001) -> list[str]:
         p = float(prices[0])
         if min_p < p < 1 - min_p:
             out.append(toks[0])
-    return out
+        else:
+            tail += p
+            dead += 1
+    return out, round(tail, 5), dead
 
 
 def all_yes_tokens(event: dict) -> list[str]:
@@ -99,11 +108,12 @@ async def capture_winner(data_dir: Path) -> None:
         if ev.get("closed"):
             print("[winner] event closed — winner capture done", flush=True)
             return
-        tokens = live_yes_tokens(ev)
+        tokens, tail, dead = live_yes_tokens(ev)
         if not tokens:
             await asyncio.sleep(300)
             continue
-        cap = DepthCapture("world-cup-winner", tokens, data_dir / "world-cup-winner")
+        cap = DepthCapture("world-cup-winner", tokens, data_dir / "world-cup-winner",
+                           meta={"live_legs": len(tokens), "dead_legs": dead, "dead_tail_sum": tail})
         # Re-resolve the live token set every 6h (outcomes die as games finish).
         await cap.run(stop_at=time.time() + 6 * 3600)
 

@@ -33,13 +33,15 @@ def _as_events(raw: str | bytes) -> list[dict]:
 
 class DepthCapture:
     def __init__(self, slug: str, asset_ids: list[str], out_dir: Path,
-                 tick_interval: float = 1.0, label: str = ""):
+                 tick_interval: float = 1.0, label: str = "",
+                 meta: dict | None = None):
         self.slug = slug
         self.assets = list(asset_ids)
         self.books: dict[str, Book] = {a: Book() for a in self.assets}
         self.out_dir = out_dir
         self.tick_interval = tick_interval
         self.label = label
+        self.meta = meta or {}
         self._arb_open = {"long": False, "short": False}
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -71,7 +73,8 @@ class DepthCapture:
                     pass
 
     def _tick(self) -> None:
-        m = tick_metrics([self.books[a] for a in self.assets])
+        m = tick_metrics([self.books[a] for a in self.assets],
+                         long_handicap=float(self.meta.get("dead_tail_sum", 0.0)))
         if m is None:
             return
         m["type"] = "tick"
@@ -88,6 +91,8 @@ class DepthCapture:
                       f"baskets={m[f'{side}_baskets']} edge=${m[f'{side}_edge']:.4f}", flush=True)
 
     async def run(self, stop_at: float | None = None) -> None:
+        if self.meta:
+            self._write({"type": "meta", **self.meta})
         backoff = 1.0
         while stop_at is None or time.time() < stop_at:
             try:
