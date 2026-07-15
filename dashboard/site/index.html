@@ -305,13 +305,16 @@
     border-radius:6px; font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:12px;
   }
   .live-panel-title{ display:flex; justify-content:space-between; gap:8px; margin:0 0 9px; color:var(--ink-3); font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; flex-wrap:wrap; }
-  .live-leg-row{ display:flex; justify-content:space-between; gap:10px; padding:3px 0; color:var(--ink-2); font-variant-numeric:tabular-nums; }
-  .live-leg-name{ color:var(--ink); font-weight:600; }
-  .live-leg-quote i{ font-style:normal; color:var(--ink-3); }
-  .live-sum-row{
-    display:flex; justify-content:space-between; margin-top:7px; padding-top:7px; border-top:1px solid var(--hairline);
-    color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums;
-  }
+  .signal-row{ padding:7px 0; border-top:1px solid var(--hairline); }
+  .signal-row:first-of-type{ border-top:none; }
+  .signal-row-head{ display:flex; align-items:center; gap:7px; }
+  .signal-dot{ width:7px; height:7px; border-radius:50%; flex:none; }
+  .signal-dot.long{ background:var(--long); }
+  .signal-dot.short{ background:var(--short); }
+  .signal-dot.dead{ background:var(--ink-3); opacity:0.55; }
+  .signal-dot.transient{ background:var(--accent); }
+  .signal-name{ color:var(--ink); font-weight:600; font-size:12px; }
+  .signal-detail{ color:var(--ink-2); margin:2px 0 0 14px; font-size:11.5px; line-height:1.5; }
   .live-note{ margin:9px 0 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:12px; color:var(--ink-2); line-height:1.55; }
   .milestone-gate{
     margin-top:14px; padding:14px 16px; background:var(--surface-raised); border:1px solid var(--hairline);
@@ -482,17 +485,37 @@
           <h3>Next milestone</h3>
           <span class="status-badge running"><span class="pulse-dot"></span>Running</span>
         </div>
-        <p style="font-size:13.5px; color:var(--ink-2); margin:10px 0 0;">Capture real order-book depth over WebSocket during detected windows on live events, to measure <b style="color:var(--ink)">executable size at the touch</b> — instead of assuming the backtested basket size just fills.</p>
+        <p style="font-size:13.5px; color:var(--ink-2); margin:10px 0 0;">Capture real order-book depth over WebSocket to measure <b style="color:var(--ink)">executable size at the touch</b> — instead of assuming the backtested basket size just fills. Expanded from 1 event to <b style="color:var(--ink)">7 concurrent</b> on day one, to build the council's 20–30 event evidence base without waiting on any single match.</p>
 
         <div class="live-panel" id="livePanel">
-          <p class="live-panel-title"><span>world-cup-winner market</span><span id="liveAsOf"></span></p>
-          <div class="live-leg-row"><span class="live-leg-name">Spain</span><span class="live-leg-quote">$0.579 <i>bid</i> · $0.580 <i>ask</i></span></div>
-          <div class="live-leg-row"><span class="live-leg-name">Argentina</span><span class="live-leg-quote">$0.421 <i>bid</i> · $0.422 <i>ask</i></span></div>
-          <div class="live-sum-row"><span>sum(ask) $1.002</span><span>sum(bid) $1.000</span></div>
-          <p class="live-note">No executable long or short arb at the touch right now (sum(ask) sits 0.2¢ above $1, sum(bid) exactly at it). Touch depth ≈ <b style="color:var(--ink)">$1.50M</b> on the ask side, <b style="color:var(--ink)">$365K</b> on the bid side — the ask/bid depth gap itself is a live reading, not something the midpoint backtest above could ever show.</p>
+          <p class="live-panel-title"><span>evidence base · 7 events</span><span id="liveAsOf"></span></p>
+          <p class="live-note" style="margin-top:0;">Day-one result: of 5 raw "arb" signals across the 7 events, a <b style="color:var(--ink)">dead-tail handicap</b> — a true basket must also buy the near-zero-priced outcomes this capture excludes — kills 2 as measurement artifacts and leaves 3 real ones.</p>
+
+          <div class="signal-row">
+            <div class="signal-row-head"><span class="signal-dot dead"></span><span class="signal-name">Ethiopia PM</span></div>
+            <div class="signal-detail">+0.57¢/basket raw vs 1.85¢ tail — net negative, artifact killed</div>
+          </div>
+          <div class="signal-row">
+            <div class="signal-row-head"><span class="signal-dot dead"></span><span class="signal-name">Fed July decision</span></div>
+            <div class="signal-detail">+0.21¢/basket raw vs 0.85¢ tail — net negative, artifact killed</div>
+          </div>
+          <div class="signal-row">
+            <div class="signal-row-head"><span class="signal-dot short"></span><span class="signal-name">World Cup Golden Boot</span></div>
+            <div class="signal-detail">short $1.79 over 1,785 baskets — real, still open (unhandicapped short side, conservative by design)</div>
+          </div>
+          <div class="signal-row">
+            <div class="signal-row-head"><span class="signal-dot long"></span><span class="signal-name">2028 election (31 legs)</span></div>
+            <div class="signal-detail">long 2.55¢/basket over 15,442 baskets, post-tail — real, still open</div>
+          </div>
+          <div class="signal-row">
+            <div class="signal-row-head"><span class="signal-dot transient"></span><span class="signal-name">Elon tweet buckets</span></div>
+            <div class="signal-detail">long $0.42 over 85 baskets — opened 23:34 UTC, gone by the 23:37 tick</div>
+          </div>
+
+          <p class="live-note">world-cup-winner and The Open golf major: no signal right now. The 2028 election edge likely survives not because it's unnoticed, but because locking capital for a ~2.5-year payout has a real carry cost a naive "free money" reading ignores.</p>
         </div>
 
-        <p style="font-size:12.5px; color:var(--ink-2); margin:12px 0 0; line-height:1.55;">Argentina — winner of the case-study match above — now faces Spain in Sunday's final, kickoff <b style="color:var(--ink)">Jul 19, 19:00 UTC</b>. That head-to-head market isn't listed yet; capture polls Gamma every 10 minutes for it (semifinal precedent: listed ~3 days pre-match) and will capture it through the game once found.</p>
+        <p style="font-size:12.5px; color:var(--ink-2); margin:12px 0 0; line-height:1.55;">Argentina — winner of the case-study match above — still faces Spain in Sunday's final, kickoff <b style="color:var(--ink)">Jul 19, 19:00 UTC</b>; that head-to-head market isn't listed yet, polled every 10 minutes.</p>
 
         <div class="milestone-gate">
           <span class="gate-num">20–30</span> events' worth of live depth data before any go/no-go on treating this as more than a measurement instrument. Directly answers the open "legging risk" question above.
@@ -504,7 +527,7 @@
   </section>
 
   <footer class="foot">
-    <p>Built from <code>README.md</code>, <code>ARCHITECTURE.md</code>, <code>CONTRACTS.md</code>, <code>LEADERBOARD.md</code>, <code>params.json</code>, <code>results/history.jsonl</code>, <code>docs/COUNCIL-2026-07-16.md</code>, <code>git log</code>, <code>pytest</code>, <code>gh run list</code>, <code>systemctl --user status polytrage-capture</code>, and <code>data/capture/world-cup-winner/*.jsonl</code> — the case-study windows are re-derived from the pipeline's own <code>align</code>/<code>find_windows</code> code, and the live market reading is the freshest tick in the capture log, not hand-computed. dashboard-eng owns <code>dashboard/**</code> and republishes this page in place on every project refresh.</p>
+    <p>Built from <code>README.md</code>, <code>ARCHITECTURE.md</code>, <code>CONTRACTS.md</code>, <code>LEADERBOARD.md</code>, <code>params.json</code>, <code>results/history.jsonl</code>, <code>docs/COUNCIL-2026-07-16.md</code>, <code>git log</code>, <code>pytest</code>, <code>gh run list</code>, <code>systemctl --user status</code> for both capture units, and every <code>data/capture/&lt;slug&gt;/*.jsonl</code> across all 7 captured events — the case-study windows are re-derived from the pipeline's own <code>align</code>/<code>find_windows</code> code, and every live reading is the freshest tick or meta row in each capture log, not hand-computed or transcribed secondhand. dashboard-eng owns <code>dashboard/**</code> and republishes this page in place on every project refresh.</p>
     <p id="buildStamp"></p>
   </footer>
 
@@ -520,9 +543,9 @@ function tok(name){ return getComputedStyle(document.documentElement).getPropert
 /* ---------------- pills ---------------- */
 function renderPills(){
   const pills = [
-    {cls:'good', label:'Tests', val:'72 passed'},
+    {cls:'good', label:'Tests', val:'74 passed'},
     {cls:'good', label:'CI', val:'passing'},
-    {cls:'good', label:'Capture', val:'running · world-cup-winner'},
+    {cls:'good', label:'Capture', val:'running · 7 events'},
     {cls:'neutral', label:'Repo', val:'public · Gods-light/polytrage'},
     {cls:'neutral', label:'Params', val:'v2026-07-15 22:43 UTC'},
   ];
@@ -818,6 +841,8 @@ makeChart(document.getElementById('chartB'), document.getElementById('ttB'), {
 /* ---------------- evolution timeline ---------------- */
 (function(){
   const events = [
+    {t:'2026-07-15T23:35:27Z', tag:'capture', type:'evolve', msg:'capture: multi-event evidence base + dead-tail-honest arb signals — 7 events concurrent, 2 of 5 raw signals killed as tail artifacts', sha:'ddacdf9'},
+    {t:'2026-07-15T23:20:57Z', tag:'dashboard', type:'docs', msg:'dashboard: capture-live refresh — pills, running-status milestone card, live depth readings', sha:'9830502'},
     {t:'2026-07-15T23:12:37Z', tag:'capture', type:'evolve', msg:'capture: live WSS order-book depth capture (council milestone experiment) — deployed as systemd unit polytrage-capture.service', sha:'f362130'},
     {t:'2026-07-15T23:02:39Z', tag:'dashboard', type:'docs', msg:'dashboard: doctype-wrapped site build for nginx serving at polytrage.logicflow.co.il', sha:'1046c95'},
     {t:'2026-07-15T22:57:00Z', tag:'dashboard', type:'docs', msg:'dashboard: live project dashboard (status, case-study chart, scoreboard, council, timeline)', sha:'4b94184'},
@@ -884,7 +909,7 @@ makeChart(document.getElementById('chartB'), document.getElementById('ttB'), {
   });
 })();
 
-document.getElementById('liveAsOf').textContent = 'as of 23:14 UTC · 111 ticks recorded';
+document.getElementById('liveAsOf').textContent = 'as of 23:39 UTC';
 document.getElementById('buildStamp').textContent = 'Dashboard rebuilt ' + new Date().toISOString().replace('T',' ').slice(0,16) + ' UTC (client render time) — source data as of the refresh that published this page.';
 </script>
 
