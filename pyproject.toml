@@ -1,0 +1,23 @@
+[project]
+name = "polytrage"
+version = "0.1.0"
+description = "Polymarket multi-outcome arbitrage: detection, backtesting, optimization, and a self-evolving parameter loop"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+polytrage = "polytrage.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
