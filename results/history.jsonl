@@ -1,1 +1,1 @@
-{"improved": false, "oos_total": 0.17974999999999985, "params": {"fee": 0.0, "max_gap_s": 180, "min_window_minutes": 1, "slippage": 0.0005, "threshold": 0.005}, "ts": "2026-07-15T22:28:11Z"}
+{"improved": false, "oos_total": 0.17974999999999985, "params": {"fee": 0.0, "max_gap_s": 180, "min_window_minutes": 1, "slippage": 0.0005, "threshold": 0.003}, "ts": "2026-07-15T22:33:21Z"}

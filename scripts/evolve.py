@@ -61,8 +61,8 @@ LEADERBOARD_TOP_N = 20
 
 def fresh_grid() -> Iterator[BacktestParams]:
     """A new grid iterator each call -- tuner.grid()'s Iterator is exhausted
-    after one use, and we need one per event (tune) plus one per event
-    (walk_forward)."""
+    after one use (walk_forward() fully materializes it internally), and we
+    call walk_forward once per event."""
     return tuner.grid(THRESHOLDS, SLIPPAGES)
 
 
@@ -180,8 +180,8 @@ def build_rows(event: Event, series: Series) -> list[AlignedRow]:
 def evaluate_event(
     event: Event, rows: list[AlignedRow], current_params: BacktestParams
 ) -> dict[str, Any] | None:
-    """Backtest current params, full-data tune, and walk-forward validate one
-    event. Returns None (after logging) if any step fails; never raises.
+    """Backtest current params, then walk-forward tune+validate one event.
+    Returns None (after logging) if any step fails; never raises.
     """
     try:
         current_result = runner.run(rows, current_params)
@@ -190,53 +190,51 @@ def evaluate_event(
         return None
 
     try:
-        tuned_params, tuned_result = tuner.tune(rows, fresh_grid())
-    except Exception as exc:
-        print(f"[evolve] tune failed for {event.slug!r}: {exc}")
-        return None
-
-    try:
         wf = tuner.walk_forward(rows, fresh_grid(), folds=FOLDS)
     except Exception as exc:
         print(f"[evolve] walk_forward failed for {event.slug!r}: {exc}")
         return None
 
-    oos_net_profit = extract_oos_net_profit(wf)
-    if oos_net_profit is None:
+    oos_net_profit, best_params = extract_walk_forward_result(wf)
+    if oos_net_profit is None or best_params is None:
         print(
-            f"[evolve] warning: couldn't read an out-of-sample profit from "
-            f"walk_forward's result for {event.slug!r} (keys={list(wf)!r}); skipping event"
+            f"[evolve] warning: unexpected walk_forward result for {event.slug!r} "
+            f"(keys={list(wf)!r}); skipping event"
         )
         return None
 
     return {
         "event": event,
         "current_result": current_result,
-        "tuned_params": tuned_params,
-        "tuned_result": tuned_result,
         "walk_forward": wf,
         "oos_net_profit": oos_net_profit,
+        "best_params": best_params,  # plain dict (per tuner.py: dataclasses.asdict already applied)
     }
 
 
-def extract_oos_net_profit(wf: dict[str, Any]) -> float | None:
-    """Pull the out-of-sample net-profit total out of tuner.walk_forward()'s
-    return dict: {"folds": [...], "oos_total": float, "best_params": ...} --
+def extract_walk_forward_result(wf: dict[str, Any]) -> tuple[float | None, dict[str, Any] | None]:
+    """Pull (oos_total, best_params) out of tuner.walk_forward()'s return
+    dict: {"folds": [...], "oos_total": float, "best_params": dict | None}.
     oos_total is the sum of each consecutive fold-pair's out-of-sample net
-    profit. Returns None (instead of raising) if the shape doesn't match, so
-    a future change to tuner.py degrades to "skip this event" rather than
+    profit; best_params is tuned on the last training fold -- the go-forward
+    choice, per tuner.py's docstring, already a plain (JSON-ready) dict.
+    Returns (None, None) instead of raising if the shape doesn't match, so a
+    future change to tuner.py degrades to "skip this event" rather than
     crashing the loop.
     """
-    val = wf.get("oos_total")
-    return float(val) if isinstance(val, (int, float)) else None
+    oos_total = wf.get("oos_total")
+    best_params = wf.get("best_params")
+    if not isinstance(oos_total, (int, float)) or not isinstance(best_params, dict):
+        return None, None
+    return float(oos_total), best_params
 
 
-def choose_global_params(evaluations: list[dict[str, Any]]) -> BacktestParams:
-    """Adopt the tuned params from whichever event's full-data tune performed
-    best in-sample. With --fixtures there's exactly one event, so this is
-    just that event's tuned params."""
-    best = max(evaluations, key=lambda e: e["tuned_result"].net_profit)
-    return best["tuned_params"]
+def choose_global_params(evaluations: list[dict[str, Any]]) -> dict[str, Any]:
+    """Adopt the walk-forward go-forward params from whichever event
+    performed best out-of-sample. With --fixtures there's exactly one event,
+    so this is just that event's best_params."""
+    best = max(evaluations, key=lambda e: e["oos_net_profit"])
+    return best["best_params"]
 
 
 # -------------------------------------------------------- results & history --
@@ -408,16 +406,16 @@ def _main(argv: list[str] | None = None) -> int:
     print(f"[evolve] out-of-sample net profit this run: {oos_total:.4f} (baseline: {baseline_display})")
 
     if should_adopt:
-        write_json(params_path, asdict(global_params))
-        write_json(baseline_path, {"ts": ts, "oos_total": oos_total, "params": asdict(global_params)})
+        write_json(params_path, global_params)
+        write_json(baseline_path, {"ts": ts, "oos_total": oos_total, "params": global_params})
         append_history(
             results_dir / "history.jsonl",
-            {"ts": ts, "params": asdict(global_params), "oos_total": oos_total, "improved": improved_over_prior},
+            {"ts": ts, "params": global_params, "oos_total": oos_total, "improved": improved_over_prior},
         )
         regenerate_leaderboard(results_dir / "history.jsonl", Path("LEADERBOARD.md"))
         verb = "improved on" if improved_over_prior else "established (no prior baseline)"
         print(
-            f"[evolve] {verb} baseline -> adopted new params {asdict(global_params)}, "
+            f"[evolve] {verb} baseline -> adopted new params {global_params}, "
             f"updated {baseline_path}, results/history.jsonl, LEADERBOARD.md"
         )
     else:

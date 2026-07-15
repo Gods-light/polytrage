@@ -1,7 +1,7 @@
 {
-  "threshold": 0.0025,
   "fee": 0.0,
-  "slippage": 0.0,
   "max_gap_s": 180,
-  "min_window_minutes": 1
+  "min_window_minutes": 1,
+  "slippage": 0.0005,
+  "threshold": 0.003
 }
