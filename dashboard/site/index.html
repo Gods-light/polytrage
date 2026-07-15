@@ -430,6 +430,54 @@
     </div>
   </section>
 
+  <section id="paper-trading">
+    <p class="eyebrow">Paper trading · live validation</p>
+    <h2 class="sec-title">Does the edge survive contact with a real order book?</h2>
+    <p class="sec-sub">A capture stream is a measurement, not a fill. <code>paper_trade.py</code> replays the recorded Golden Boot short signal against the actual displayed bids — hitting each leg's touch price, capped by displayed size — then grades every fill on whether that price level was still there 30 seconds later, or had already been pulled out from under it.</p>
+
+    <div class="stat-grid">
+      <div class="stat-tile">
+        <p class="stat-label">Position filled</p>
+        <div class="stat-value">500<span class="unit">of 500 cap</span></div>
+      </div>
+      <div class="stat-tile">
+        <p class="stat-label">Cost</p>
+        <div class="stat-value">$999.50</div>
+      </div>
+      <div class="stat-tile">
+        <p class="stat-label">Locked edge — guaranteed</p>
+        <div class="stat-value accent">$0.50</div>
+      </div>
+      <div class="stat-tile">
+        <p class="stat-label">Windfall if a dead-tail golfer wins</p>
+        <div class="stat-value">+$500</div>
+      </div>
+      <div class="stat-tile">
+        <p class="stat-label">Fill quality</p>
+        <div class="stat-value">10/10<span class="unit">solid</span></div>
+      </div>
+      <div class="stat-tile">
+        <p class="stat-label">sum(bid) at fill</p>
+        <div class="stat-value">$1.001</div>
+      </div>
+    </div>
+
+    <div class="hist-wrap" style="margin-top:16px;">
+      <p class="hist-title">What the apparent edge is actually made of</p>
+      <p style="font-size:13.5px; color:var(--ink-2); line-height:1.65; margin:0;">Sum every one of the 52 Golden Boot outcomes' best bids — the 3 live legs (<code>$1.001</code>) plus the 49 near-zero dead-tail legs (<code>$0.011</code>) — and the book implies <b style="color:var(--ink)">101.2¢</b> of total probability: an apparent <b style="color:var(--ink)">1.2¢/basket</b> edge. Only <b style="color:var(--long)">0.1¢</b> of that is genuinely executable right now, on the 3 live legs — what the paper trader actually locked in, 500 baskets deep. The other <b style="color:var(--ink)">1.1¢</b> is sitting in the dead tail's own residual pricing: the market still paying for a real, if remote, chance one of 49 long-shot golfers wins — option value, not a mispricing anyone left on the table.</p>
+    </div>
+
+    <button class="table-toggle" id="fillsToggle" aria-expanded="false">View all 10 fills as a table ▾</button>
+    <div class="windows-table-wrap" id="fillsTableWrap">
+      <table class="windows" id="fillsTable">
+        <thead><tr><th>Fill</th><th>Time (UTC)</th><th>Baskets</th><th>Bids hit (3 legs)</th><th>Cost</th><th>Locked edge</th><th>Grade</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <p style="font-size:12px; color:var(--ink-3); margin:14px 0 0; line-height:1.6;">Council caveat: this validates a <b style="color:var(--ink-2)">standing</b> dislocation, not a goal-second race — legging and cancel risk during a fast-moving live window are only partially observable this way. Data: <code>data/paper/world-cup-golden-boot-winner-short/{state.json,trades.jsonl}</code>.</p>
+  </section>
+
   <section id="council">
     <p class="eyebrow">Council review · 2026-07-16</p>
     <h2 class="sec-title">A four-voice review, before any edge claim gets trusted</h2>
@@ -518,8 +566,9 @@
         <p style="font-size:12.5px; color:var(--ink-2); margin:12px 0 0; line-height:1.55;">Argentina — winner of the case-study match above — still faces Spain in Sunday's final, kickoff <b style="color:var(--ink)">Jul 19, 19:00 UTC</b>; that head-to-head market isn't listed yet, polled every 10 minutes.</p>
 
         <div class="milestone-gate">
-          <span class="gate-num">20–30</span> events' worth of live depth data before any go/no-go on treating this as more than a measurement instrument. Directly answers the open "legging risk" question above.
+          <span class="gate-num">20–30</span> events' worth of live depth data before any go/no-go on treating this as more than a measurement instrument. Directly answers the open "legging risk" question above — first live evidence is in, see Paper trading below.
         </div>
+        <p style="font-size:11.5px; color:var(--ink-3); margin:10px 0 0; line-height:1.55;"><code>orchestration/graph.py</code> — a LangGraph review→develop→test→improve loop — is in-repo but deliberately <b style="color:var(--ink-2)">not</b> wired to cron yet, pending diff-check hardening and this same go/no-go.</p>
         <div class="milestone-endpoint">wss://ws-subscriptions-clob.polymarket.com/ws/market</div>
       </div>
 
@@ -527,7 +576,7 @@
   </section>
 
   <footer class="foot">
-    <p>Built from <code>README.md</code>, <code>ARCHITECTURE.md</code>, <code>CONTRACTS.md</code>, <code>LEADERBOARD.md</code>, <code>params.json</code>, <code>results/history.jsonl</code>, <code>docs/COUNCIL-2026-07-16.md</code>, <code>git log</code>, <code>pytest</code>, <code>gh run list</code>, <code>systemctl --user status</code> for both capture units, and every <code>data/capture/&lt;slug&gt;/*.jsonl</code> across all 7 captured events — the case-study windows are re-derived from the pipeline's own <code>align</code>/<code>find_windows</code> code, and every live reading is the freshest tick or meta row in each capture log, not hand-computed or transcribed secondhand. dashboard-eng owns <code>dashboard/**</code> and republishes this page in place on every project refresh.</p>
+    <p>Built from <code>README.md</code>, <code>ARCHITECTURE.md</code>, <code>CONTRACTS.md</code>, <code>LEADERBOARD.md</code>, <code>params.json</code>, <code>results/history.jsonl</code>, <code>docs/COUNCIL-2026-07-16.md</code>, <code>git log</code>, <code>pytest</code>, <code>gh run list</code>, <code>systemctl --user status</code> for all three capture/paper units, every <code>data/capture/&lt;slug&gt;/*.jsonl</code> across all 7 captured events, and <code>data/paper/world-cup-golden-boot-winner-short/{state.json,trades.jsonl}</code> — the case-study windows are re-derived from the pipeline's own <code>align</code>/<code>find_windows</code> code, and every live reading is the freshest tick, fill, or meta row in each log, not hand-computed or transcribed secondhand. dashboard-eng owns <code>dashboard/**</code> and republishes this page in place on every project refresh.</p>
     <p id="buildStamp"></p>
   </footer>
 
@@ -543,9 +592,10 @@ function tok(name){ return getComputedStyle(document.documentElement).getPropert
 /* ---------------- pills ---------------- */
 function renderPills(){
   const pills = [
-    {cls:'good', label:'Tests', val:'74 passed'},
+    {cls:'good', label:'Tests', val:'78 passed'},
     {cls:'good', label:'CI', val:'passing'},
     {cls:'good', label:'Capture', val:'running · 7 events'},
+    {cls:'good', label:'Paper', val:'500 baskets live · $0.50 locked'},
     {cls:'neutral', label:'Repo', val:'public · Gods-light/polytrage'},
     {cls:'neutral', label:'Params', val:'v2026-07-15 22:43 UTC'},
   ];
@@ -822,6 +872,49 @@ makeChart(document.getElementById('chartB'), document.getElementById('ttB'), {
   });
 })();
 
+/* ---------------- paper-trading fills table ---------------- */
+(function(){
+  const FILLS = [
+    {ts:'23:31:28', baskets:50, bids:[0.655,0.34,0.006], cost:99.95, edge:0.05, grade:'solid'},
+    {ts:'23:31:29', baskets:50, bids:[0.655,0.34,0.006], cost:99.95, edge:0.05, grade:'solid'},
+    {ts:'23:31:30', baskets:50, bids:[0.655,0.34,0.006], cost:99.95, edge:0.05, grade:'solid'},
+    {ts:'23:31:31', baskets:50, bids:[0.655,0.34,0.006], cost:99.95, edge:0.05, grade:'solid'},
+    {ts:'23:31:32', baskets:50, bids:[0.655,0.34,0.006], cost:99.95, edge:0.05, grade:'solid'},
+    {ts:'23:31:33', baskets:50, bids:[0.655,0.34,0.006], cost:99.95, edge:0.05, grade:'solid'},
+    {ts:'23:31:35', baskets:50, bids:[0.655,0.34,0.006], cost:99.95, edge:0.05, grade:'solid'},
+    {ts:'23:31:36', baskets:50, bids:[0.655,0.34,0.006], cost:99.95, edge:0.05, grade:'solid'},
+    {ts:'23:31:37', baskets:50, bids:[0.655,0.34,0.006], cost:99.95, edge:0.05, grade:'solid'},
+    {ts:'23:31:38', baskets:50, bids:[0.655,0.34,0.006], cost:99.95, edge:0.05, grade:'solid'},
+  ];
+  const tbody = document.querySelector('#fillsTable tbody');
+  FILLS.forEach((f,i)=>{
+    const tr = document.createElement('tr');
+    const cells = [
+      [String(i+1), 'mono-strong'],
+      [f.ts + ' UTC', ''],
+      [f.baskets.toFixed(0), ''],
+      [f.bids.map(b=>b.toFixed(3)).join(' / '), ''],
+      ['$'+f.cost.toFixed(2), ''],
+      ['$'+f.edge.toFixed(2), 'side-long'],
+      [f.grade, 'mono-strong'],
+    ];
+    cells.forEach(([text,cls])=>{
+      const td = document.createElement('td');
+      if(cls) td.className = cls;
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  const btn = document.getElementById('fillsToggle');
+  const wrap = document.getElementById('fillsTableWrap');
+  btn.addEventListener('click', ()=>{
+    const open = wrap.classList.toggle('show');
+    btn.setAttribute('aria-expanded', String(open));
+    btn.textContent = open ? 'Hide fills table ▴' : 'View all 10 fills as a table ▾';
+  });
+})();
+
 /* ---------------- edge histogram ---------------- */
 (function(){
   const buckets = [ ['<1¢',14], ['1–2¢',10], ['2–5¢',1], ['≥5¢',1] ];
@@ -841,6 +934,9 @@ makeChart(document.getElementById('chartB'), document.getElementById('ttB'), {
 /* ---------------- evolution timeline ---------------- */
 (function(){
   const events = [
+    {t:'2026-07-15T23:44:24Z', tag:'tests', type:'fix', msg:'tests: fix paper position-cap test arithmetic — suite 78/78', sha:'1476a7c'},
+    {t:'2026-07-15T23:43:50Z', tag:'dashboard', type:'docs', msg:'dashboard: day-one signals card (5 raw → 2 artifacts → 3 real), 7-event capture', sha:'0eb0391'},
+    {t:'2026-07-15T23:43:34Z', tag:'paper', type:'evolve', msg:'paper: Golden Boot short-arb paper trader over recorded live books — first session 500/500 baskets, 10/10 fills solid', sha:'0a5af50'},
     {t:'2026-07-15T23:35:27Z', tag:'capture', type:'evolve', msg:'capture: multi-event evidence base + dead-tail-honest arb signals — 7 events concurrent, 2 of 5 raw signals killed as tail artifacts', sha:'ddacdf9'},
     {t:'2026-07-15T23:20:57Z', tag:'dashboard', type:'docs', msg:'dashboard: capture-live refresh — pills, running-status milestone card, live depth readings', sha:'9830502'},
     {t:'2026-07-15T23:12:37Z', tag:'capture', type:'evolve', msg:'capture: live WSS order-book depth capture (council milestone experiment) — deployed as systemd unit polytrage-capture.service', sha:'f362130'},
