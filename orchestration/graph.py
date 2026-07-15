@@ -287,10 +287,11 @@ def build_graph():
 # Module-level compiled instance for tooling (e.g. the visualize-graph
 # script) that expects `module:attr` to already be a compiled graph rather
 # than a factory. Safe to build at import time: ChatOpenAI's constructor
-# doesn't make a network call, and OMNIROUTE_API_KEY only needs to be a
-# non-empty string to satisfy the client, not a real key, for graph
+# doesn't make a network call, and the POLYTRAGE_LLM_* vars only need to be
+# non-empty strings to satisfy the client, not real values, for graph
 # introspection (get_graph()/draw_mermaid()) to work.
-os.environ.setdefault("OMNIROUTE_API_KEY", "unset")
+os.environ.setdefault("POLYTRAGE_LLM_BASE_URL", "http://localhost:0/v1")
+os.environ.setdefault("POLYTRAGE_LLM_API_KEY", "unset")
 graph = build_graph()
 
 if __name__ == "__main__":
