@@ -1,0 +1,15 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+/data/
+.venv/
+
+# Scratch output under results/ is ignored by default, but the evolve loop's
+# persisted state must survive across CI runs (there's no other artifact
+# store here), so carve those two files back in. params.json and
+# LEADERBOARD.md live at the repo root and stay tracked as normal.
+results/*.json
+results/*.jsonl
+!results/.gitkeep
+!results/baseline.json
+!results/history.jsonl
