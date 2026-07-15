@@ -70,6 +70,43 @@ def test_extract_best_params_reads_best_params_dict():
         cli._extract_best_params({"folds": [], "oos_total": 0.0, "best_params": None})
 
 
+# --- frozen-cost defaults (needs polytrage.optimize.tuner for the constants) ----
+
+def test_default_backtest_params_uses_frozen_costs_by_default(tmp_path, monkeypatch):
+    pytest.importorskip("polytrage.optimize.tuner")
+    from polytrage.optimize import tuner
+
+    monkeypatch.chdir(tmp_path)  # guarantee no stray params.json shadows the default
+    params = cli._default_backtest_params()
+    assert params.fee == tuner.FROZEN_FEE
+    assert params.slippage == tuner.FROZEN_SLIPPAGE
+
+
+def test_default_backtest_params_prefers_params_json_when_present(tmp_path, monkeypatch):
+    pytest.importorskip("polytrage.optimize.tuner")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "params.json").write_text(json.dumps({
+        "threshold": 0.02, "fee": 0.001, "slippage": 0.003,
+        "max_gap_s": 60, "min_window_minutes": 2,
+    }))
+    params = cli._default_backtest_params()
+    assert params.threshold == 0.02
+    assert params.slippage == 0.003
+
+
+def test_slippage_override_grid_reuses_default_grid_axes():
+    pytest.importorskip("polytrage.optimize.tuner")
+    from polytrage.optimize import tuner
+
+    baseline = list(tuner.DEFAULT_GRID())
+    overridden = cli._slippage_override_grid(tuner, 0.02)
+
+    assert len(overridden) == len(baseline)
+    assert {p.threshold for p in overridden} == {p.threshold for p in baseline}
+    assert all(p.slippage == 0.02 for p in overridden)
+    assert all(p.fee == tuner.FROZEN_FEE for p in overridden)
+
+
 # --- report (file I/O only, no other modules needed) -----------------------
 
 def test_report_missing_results_dir(tmp_path, capsys):
@@ -114,13 +151,15 @@ def test_scan_fixtures(capsys):
     assert capsys.readouterr().out.strip() != ""
 
 
-def test_backtest_fixtures(capsys):
+def test_backtest_fixtures(tmp_path, monkeypatch, capsys):
     pytest.importorskip("polytrage.data.gamma")
     pytest.importorskip("polytrage.data.clob")
     pytest.importorskip("polytrage.engine.align")
     pytest.importorskip("polytrage.engine.arb")
     pytest.importorskip("polytrage.backtest.runner")
     pytest.importorskip("polytrage.backtest.metrics")
+    pytest.importorskip("polytrage.optimize.tuner")  # _default_backtest_params falls back to it
+    monkeypatch.chdir(tmp_path)  # no stray params.json -> exercises the frozen-cost default
     rc = cli.main(["backtest", "--fixtures", "--fixtures-dir", str(FIXTURES_DIR)])
     assert rc == 0
     assert "England vs. Argentina" in capsys.readouterr().out
@@ -143,3 +182,19 @@ def test_optimize_fixtures_writes_params(tmp_path, capsys):
 
     data = json.loads(out_path.read_text())
     assert "threshold" in data
+
+
+def test_optimize_slippage_override_flows_to_written_params(tmp_path):
+    pytest.importorskip("polytrage.data.gamma")
+    pytest.importorskip("polytrage.data.clob")
+    pytest.importorskip("polytrage.engine.align")
+    pytest.importorskip("polytrage.engine.arb")
+    pytest.importorskip("polytrage.optimize.tuner")
+    out_path = tmp_path / "params.json"
+    rc = cli.main([
+        "optimize", "--fixtures", "--fixtures-dir", str(FIXTURES_DIR),
+        "--slippage", "0.01", "--out", str(out_path),
+    ])
+    assert rc == 0
+    data = json.loads(out_path.read_text())
+    assert data["slippage"] == 0.01

@@ -13,8 +13,12 @@ from polytrage.backtest import metrics, runner
 from polytrage.models import AlignedRow, ArbWindow, BacktestParams, BacktestResult
 
 
-def _window(side: str, start: int, end: int, peak_sum: float, peak_t: int, minutes: int) -> ArbWindow:
-    return ArbWindow(side=side, start=start, end=end, peak_sum=peak_sum, peak_t=peak_t, minutes=minutes)
+def _window(
+    side: str, start: int, end: int, peak_sum: float, peak_t: int, minutes: int, entry_sum: float = 0.0
+) -> ArbWindow:
+    return ArbWindow(
+        side=side, start=start, end=end, peak_sum=peak_sum, peak_t=peak_t, minutes=minutes, entry_sum=entry_sum
+    )
 
 
 def _result(windows: list[ArbWindow], trades: int, gross: float, net: float, arb_minutes: int) -> BacktestResult:
@@ -31,31 +35,36 @@ def _result(windows: list[ArbWindow], trades: int, gross: float, net: float, arb
 # --- Group 1: pure unit tests of runner.simulate (no engine import) --------
 
 
-def test_simulate_single_long_window():
-    window = _window("long", start=60, end=180, peak_sum=0.90, peak_t=120, minutes=3)
+def test_simulate_fills_at_entry_not_peak():
+    # entry (first qualifying row) sum 0.92 -> edge 0.08; peak (deepest) sum
+    # 0.90 -> edge 0.10. Must fill at entry — the peak isn't knowable until
+    # the window has already closed.
+    window = _window("long", start=60, end=180, peak_sum=0.90, peak_t=120, minutes=3, entry_sum=0.92)
     params = BacktestParams(fee=0.0, slippage=0.001)
 
     result = runner.simulate([window], params, n_legs=3)
 
+    assert window.edge == pytest.approx(0.10, abs=1e-9)  # peak — NOT used for fill
+    assert window.entry_edge == pytest.approx(0.08, abs=1e-9)  # entry — used for fill
     assert result.trades == 1
     assert result.windows == [window]
-    assert result.gross_edge == pytest.approx(0.10, abs=1e-9)
-    assert result.net_profit == pytest.approx(0.10 - 0.001 * 3, abs=1e-9)
+    assert result.gross_edge == pytest.approx(0.08, abs=1e-9)
+    assert result.net_profit == pytest.approx(0.08 - 0.001 * 3, abs=1e-9)
     assert result.arb_minutes == 3
     assert result.events == 1
 
 
 def test_simulate_multiple_windows_accumulate():
-    long_w = _window("long", 60, 180, 0.90, 120, 3)
-    short_w = _window("short", 300, 360, 1.12, 360, 2)
+    long_w = _window("long", 60, 180, 0.90, 120, 3, entry_sum=0.93)
+    short_w = _window("short", 300, 360, 1.12, 360, 2, entry_sum=1.09)
     params = BacktestParams(fee=0.0002, slippage=0.001)
 
     result = runner.simulate([long_w, short_w], params, n_legs=3)
 
     assert result.trades == 2
-    assert result.gross_edge == pytest.approx(long_w.edge + short_w.edge, abs=1e-9)
-    expected_net = (long_w.edge - params.fee - params.slippage * 3) + (
-        short_w.edge - params.fee - params.slippage * 3
+    assert result.gross_edge == pytest.approx(long_w.entry_edge + short_w.entry_edge, abs=1e-9)
+    expected_net = (long_w.entry_edge - params.fee - params.slippage * 3) + (
+        short_w.entry_edge - params.fee - params.slippage * 3
     )
     assert result.net_profit == pytest.approx(expected_net, abs=1e-9)
     assert result.arb_minutes == 5
@@ -73,13 +82,17 @@ def test_simulate_empty_windows_is_all_zero():
     assert result.windows == []
 
 
-def test_simulate_fee_and_slippage_reduce_net_below_gross():
-    window = _window("long", 0, 60, 0.95, 0, 2)
+def test_simulate_falls_back_to_peak_edge_when_entry_sum_unset():
+    # Hand-built windows that don't set entry_sum (still the 0.0 default)
+    # must keep working: fall back to the peak edge instead of filling at 0.
+    window = _window("long", 0, 60, 0.95, 0, 2)  # entry_sum left at default 0.0
     params = BacktestParams(fee=0.001, slippage=0.002)
 
     result = runner.simulate([window], params, n_legs=4)
 
-    assert result.net_profit < result.gross_edge
+    assert window.entry_sum == 0.0
+    assert result.gross_edge == pytest.approx(window.edge, abs=1e-9)  # fallback to peak
+    assert result.net_profit < result.gross_edge  # fee/slippage still apply
 
 
 # --- metrics.summarize / to_markdown (hand-built results, no engine) -------
@@ -91,15 +104,24 @@ def test_summarize_totals_and_buckets():
     w_mid = _window("short", 120, 180, 1.03, 180, 1)  # edge 0.03 -> 2-5c
     w_big = _window("short", 180, 240, 1.08, 240, 1)  # edge 0.08 -> >=5c
 
-    r1 = _result([w_tiny, w_small], trades=2, gross=0.02, net=0.015, arb_minutes=2)
-    r2 = _result([w_mid, w_big], trades=2, gross=0.11, net=0.10, arb_minutes=2)
+    # gross/net are hand-set BELOW the peak-edge sum (0.13) on purpose, to
+    # prove executed totals and peak_gross_edge are tracked independently.
+    r1 = _result([w_tiny, w_small], trades=2, gross=0.018, net=0.013, arb_minutes=2)
+    r2 = _result([w_mid, w_big], trades=2, gross=0.095, net=0.085, arb_minutes=2)
 
     summary = metrics.summarize([r1, r2])
 
     assert summary["totals"] == pytest.approx(
-        {"trades": 4, "gross": 0.13, "net": 0.115, "arb_minutes": 4, "events": 2}
+        {
+            "trades": 4,
+            "gross": 0.113,
+            "net": 0.098,
+            "arb_minutes": 4,
+            "events": 2,
+            "peak_gross_edge": 0.13,
+        }
     )
-    assert summary["profit_per_trade"] == pytest.approx(0.115 / 4)
+    assert summary["profit_per_trade"] == pytest.approx(0.098 / 4)
     assert summary["long_windows"] == 2
     assert summary["short_windows"] == 2
     assert summary["edge_buckets"] == {"<1c": 1, "1-2c": 1, "2-5c": 1, ">=5c": 1}
@@ -108,7 +130,14 @@ def test_summarize_totals_and_buckets():
 def test_summarize_empty_list_is_all_zero():
     summary = metrics.summarize([])
 
-    assert summary["totals"] == {"trades": 0, "gross": 0.0, "net": 0.0, "arb_minutes": 0, "events": 0}
+    assert summary["totals"] == {
+        "trades": 0,
+        "gross": 0.0,
+        "net": 0.0,
+        "arb_minutes": 0,
+        "events": 0,
+        "peak_gross_edge": 0.0,
+    }
     assert summary["profit_per_trade"] == 0.0
     assert summary["long_windows"] == 0
     assert summary["short_windows"] == 0
@@ -126,6 +155,7 @@ def test_to_markdown_contains_key_figures():
     assert "|" in report  # markdown table
     assert "trades" in report
     assert "1" in report
+    assert "peak" in report.lower()  # executed-vs-peak distinction is visible
     for bucket in ("<1c", "1-2c", "2-5c", ">=5c"):
         assert bucket in report
 
@@ -163,14 +193,20 @@ def test_run_end_to_end_against_engine():
     assert (lw.start, lw.end, lw.minutes) == (60, 180, 3)
     assert lw.peak_sum == pytest.approx(0.90, abs=1e-9)
     assert lw.peak_t == 120
+    assert lw.entry_sum == pytest.approx(0.92, abs=1e-9)  # first qualifying row, t=60
+    assert lw.entry_edge == pytest.approx(0.08, abs=1e-9)
 
     sw = short_windows[0]
     assert (sw.start, sw.end, sw.minutes) == (300, 360, 2)
     assert sw.peak_sum == pytest.approx(1.12, abs=1e-9)
     assert sw.peak_t == 360
+    assert sw.entry_sum == pytest.approx(1.10, abs=1e-9)  # first qualifying row, t=300
+    assert sw.entry_edge == pytest.approx(0.10, abs=1e-9)
 
+    # runner fills at entry, not peak: gross must reflect entry_edge (0.08 +
+    # 0.10 = 0.18), not the peak edge (0.10 + 0.12 = 0.22).
     n_legs = 3
-    expected_gross = lw.edge + sw.edge
+    expected_gross = lw.entry_edge + sw.entry_edge
     expected_net = expected_gross - params.fee * 2 - params.slippage * n_legs * 2
     assert result.gross_edge == pytest.approx(expected_gross, abs=1e-9)
     assert result.net_profit == pytest.approx(expected_net, abs=1e-9)

@@ -67,6 +67,7 @@ def _side_windows(rows: list[AlignedRow], params: BacktestParams, side: str) -> 
                 peak_sum=peak_row.total,
                 peak_t=peak_row.t,
                 minutes=len(group),
+                entry_sum=group[0].total,
             )
         )
     return [w for w in windows if w.minutes >= params.min_window_minutes]

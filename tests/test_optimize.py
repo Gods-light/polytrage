@@ -26,30 +26,93 @@ def test_grid_cartesian_product_and_order():
     params = list(
         tuner.grid(
             thresholds=(0.001, 0.005),
-            slippages=(0.0, 0.002),
             max_gaps=(60, 180),
             min_windows=(1, 2),
         )
     )
-    assert len(params) == 2 * 2 * 2 * 2
+    assert len(params) == 2 * 2 * 2  # thresholds x max_gaps x min_windows only
     assert all(isinstance(p, BacktestParams) for p in params)
     assert (
-        BacktestParams(threshold=0.005, slippage=0.002, max_gap_s=60, min_window_minutes=2)
+        BacktestParams(
+            threshold=0.005,
+            fee=tuner.FROZEN_FEE,
+            slippage=tuner.FROZEN_SLIPPAGE,
+            max_gap_s=60,
+            min_window_minutes=2,
+        )
         in params
     )
     # deterministic nesting: thresholds outermost, min_windows innermost
     assert params[0] == BacktestParams(
-        threshold=0.001, slippage=0.0, max_gap_s=60, min_window_minutes=1
+        threshold=0.001,
+        fee=tuner.FROZEN_FEE,
+        slippage=tuner.FROZEN_SLIPPAGE,
+        max_gap_s=60,
+        min_window_minutes=1,
     )
     assert params[-1] == BacktestParams(
-        threshold=0.005, slippage=0.002, max_gap_s=180, min_window_minutes=2
+        threshold=0.005,
+        fee=tuner.FROZEN_FEE,
+        slippage=tuner.FROZEN_SLIPPAGE,
+        max_gap_s=180,
+        min_window_minutes=2,
     )
 
 
-def test_grid_uses_backtestparams_defaults_for_omitted_axes():
+def test_grid_uses_frozen_costs_and_backtestparams_defaults_for_other_axes():
     params = list(tuner.grid(thresholds=(0.005,)))
-    assert params == [BacktestParams(threshold=0.005)]
-    assert params[0].fee == 0.0  # fee is never a search axis
+    assert params == [
+        BacktestParams(
+            threshold=0.005,
+            fee=tuner.FROZEN_FEE,
+            slippage=tuner.FROZEN_SLIPPAGE,
+            max_gap_s=180,
+            min_window_minutes=1,
+        )
+    ]
+
+
+def test_grid_costs_are_frozen_across_every_combination():
+    # Cost params must never vary across a grid -- an optimizer free to walk
+    # slippage toward 0 always reports a rosier net_profit for the wrong
+    # reason (Goodhart), regardless of how many detection-param combos exist.
+    params = list(
+        tuner.grid(thresholds=(0.001, 0.005, 0.01), max_gaps=(60, 180), min_windows=(1, 2, 3))
+    )
+    assert len(params) == 3 * 2 * 3
+    assert {p.fee for p in params} == {tuner.FROZEN_FEE}
+    assert {p.slippage for p in params} == {tuner.FROZEN_SLIPPAGE}
+
+
+def test_grid_allows_a_deliberate_single_cost_override_not_a_search_axis():
+    # fee/slippage can be overridden for a what-if scenario, but only as one
+    # scalar applied to the whole grid -- never as a per-combination axis.
+    params = list(tuner.grid(thresholds=(0.005, 0.01), fee=0.001, slippage=0.003))
+    assert len(params) == 2
+    assert all(p.fee == 0.001 and p.slippage == 0.003 for p in params)
+
+
+def test_grid_fee_and_slippage_are_keyword_only():
+    with pytest.raises(TypeError):
+        list(tuner.grid((0.005,), (180,), (1,), 0.0, 0.002))  # type: ignore[misc]
+
+
+def test_default_grid_is_the_documented_threshold_sweep():
+    params = list(tuner.DEFAULT_GRID())
+    assert [p.threshold for p in params] == [0.003, 0.005, 0.0075, 0.01, 0.015, 0.02]
+    assert all(p.fee == tuner.FROZEN_FEE for p in params)
+    assert all(p.slippage == tuner.FROZEN_SLIPPAGE for p in params)
+    assert all(p.max_gap_s == 180 and p.min_window_minutes == 1 for p in params)
+
+
+def test_default_grid_is_deterministic_and_fresh_each_call():
+    first = list(tuner.DEFAULT_GRID())
+    second = list(tuner.DEFAULT_GRID())
+    assert first == second
+    # each call returns an independent generator, not a shared/exhausted one
+    gen = tuner.DEFAULT_GRID()
+    assert next(gen).threshold == 0.003
+    assert list(tuner.DEFAULT_GRID())[0].threshold == 0.003  # unaffected by the above
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +151,8 @@ def test_tune_picks_the_threshold_with_max_net_profit():
     # By construction: sum=0.98 is a big long-side edge (2c), sum=0.999 is a
     # tiny one (0.1c). At threshold=0.005 only the first row qualifies as an
     # arb window; at threshold=0.0005 both do. The tiny second edge doesn't
-    # cover its own slippage (2 legs * 0.001 = 0.002 > 0.001), so adding it
-    # should make the looser threshold *worse*, not better.
+    # cover its own cost (2 legs * FROZEN_SLIPPAGE = 0.004 > its 0.001 edge),
+    # so adding it should make the looser threshold *worse*, not better.
     rows = [
         AlignedRow(t=0, prices=(0.49, 0.49)),
         AlignedRow(t=2000, prices=(0.4995, 0.4995)),

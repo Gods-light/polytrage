@@ -2,6 +2,6 @@
   "fee": 0.0,
   "max_gap_s": 180,
   "min_window_minutes": 1,
-  "slippage": 0.0005,
-  "threshold": 0.003
+  "slippage": 0.002,
+  "threshold": 0.005
 }

@@ -20,10 +20,13 @@ def summarize(results: list[BacktestResult]) -> dict:
     """Aggregate backtest results (one per event) into totals and histograms."""
     totals = {
         "trades": sum(r.trades for r in results),
-        "gross": sum(r.gross_edge for r in results),
+        "gross": sum(r.gross_edge for r in results),  # executed, at entry
         "net": sum(r.net_profit for r in results),
         "arb_minutes": sum(r.arb_minutes for r in results),
         "events": sum(r.events for r in results),
+        # theoretical max if every trade filled at its window's peak instead
+        # of its entry — reporting only, never used to compute net/gross.
+        "peak_gross_edge": sum(w.edge for r in results for w in r.windows),
     }
     long_windows = 0
     short_windows = 0
@@ -55,7 +58,8 @@ def to_markdown(summary: dict) -> str:
         "|---|---|",
         f"| events | {totals['events']} |",
         f"| trades | {totals['trades']} |",
-        f"| gross edge | ${totals['gross']:.4f} |",
+        f"| gross edge (executed, entry) | ${totals['gross']:.4f} |",
+        f"| gross edge (peak, theoretical max) | ${totals['peak_gross_edge']:.4f} |",
         f"| net profit | ${totals['net']:.4f} |",
         f"| profit / trade | ${summary['profit_per_trade']:.4f} |",
         f"| arb minutes | {totals['arb_minutes']} |",

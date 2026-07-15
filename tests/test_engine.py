@@ -86,12 +86,20 @@ def test_find_windows_merges_gaps_within_max_gap_s():
     assert (lw.start, lw.end, lw.minutes) == (60, 240, 3)
     assert lw.peak_sum == pytest.approx(0.80)
     assert lw.peak_t == 120
+    # entry_sum is the FIRST qualifying row (t=60, total 0.85), not the peak (t=120, total 0.80).
+    assert lw.entry_sum == pytest.approx(0.85)
+    assert lw.entry_edge == pytest.approx(0.15)
+    assert lw.entry_edge <= lw.edge
 
     assert len(short_windows) == 1
     sw = short_windows[0]
     assert (sw.start, sw.end, sw.minutes) == (300, 360, 2)
     assert sw.peak_sum == pytest.approx(1.25)
     assert sw.peak_t == 360
+    # entry_sum is the FIRST qualifying row (t=300, total 1.20), not the peak (t=360, total 1.25).
+    assert sw.entry_sum == pytest.approx(1.20)
+    assert sw.entry_edge == pytest.approx(0.20)
+    assert sw.entry_edge <= sw.edge
 
 
 def test_find_windows_splits_on_gap_larger_than_max_gap_s():
@@ -103,8 +111,13 @@ def test_find_windows_splits_on_gap_larger_than_max_gap_s():
     assert len(long_windows) == 2
     assert (long_windows[0].start, long_windows[0].end, long_windows[0].minutes) == (60, 120, 2)
     assert long_windows[0].peak_sum == pytest.approx(0.80)
+    # first qualifying row of this group is still t=60 (total 0.85), same as the merged case above.
+    assert long_windows[0].entry_sum == pytest.approx(0.85)
     assert (long_windows[1].start, long_windows[1].end, long_windows[1].minutes) == (240, 240, 1)
     assert long_windows[1].peak_sum == pytest.approx(0.85)
+    # single-row window: the first (only) qualifying row IS the peak.
+    assert long_windows[1].entry_sum == pytest.approx(0.85)
+    assert long_windows[1].entry_edge == pytest.approx(long_windows[1].edge)
 
 
 def test_find_windows_drops_windows_shorter_than_min_window_minutes():
@@ -185,4 +198,21 @@ def test_fixture_alignment_and_windows_match_reference():
     windows = find_windows(rows, BacktestParams())
     long_windows = [w for w in windows if w.side == "long"]
 
-    assert any(w.peak_sum == pytest.approx(min_total, abs=1e-9) for w in long_windows)
+    peak_matches = [w for w in long_windows if w.peak_sum == pytest.approx(min_total, abs=1e-9)]
+    assert len(peak_matches) == 1
+    window = peak_matches[0]
+
+    # entry_sum must be the total of the first qualifying row (t == window.start),
+    # cross-checked independently against the full aligned-row list -- not the peak,
+    # which would be lookahead bias for fill simulation.
+    entry_row_total = next(row.total for row in rows if row.t == window.start)
+    assert window.entry_sum == pytest.approx(entry_row_total, abs=1e-9)
+    assert window.entry_sum == pytest.approx(0.9425, abs=1e-9)
+
+    # In this particular window the extreme happens to occur on its first minute,
+    # so entry and peak coincide here -- confirmed structurally elsewhere (the
+    # hand-built gap-merge tests) that they can differ.
+    assert window.entry_edge == pytest.approx(window.edge, abs=1e-9)
+
+    # peak is by construction at least as extreme as entry -- must hold for every window.
+    assert all(w.entry_edge <= w.edge + 1e-9 for w in windows)

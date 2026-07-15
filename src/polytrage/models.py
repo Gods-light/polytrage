@@ -69,11 +69,19 @@ class ArbWindow:
     peak_sum: float         # most extreme sum observed
     peak_t: int             # when the extreme occurred
     minutes: int            # number of qualifying data points
+    entry_sum: float = 0.0  # sum at the FIRST qualifying row — the executable
+                            # reference price; peak is lookahead and must not
+                            # be used for fill simulation
 
     @property
     def edge(self) -> float:
-        """Best gross edge in dollars per $1 basket."""
+        """Best gross edge in dollars per $1 basket (peak — reporting only)."""
         return abs(1.0 - self.peak_sum)
+
+    @property
+    def entry_edge(self) -> float:
+        """Gross edge at detection time — use THIS for fill simulation."""
+        return abs(1.0 - self.entry_sum) if self.entry_sum else 0.0
 
 
 @dataclass

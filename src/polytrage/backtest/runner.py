@@ -1,6 +1,8 @@
 """Backtest runner: turn engine-detected ArbWindows into simulated trades.
 
-One $1 basket is traded per window, executed at the window's peak edge.
+One $1 basket is traded per window, executed at the window's entry edge
+(the edge at detection time, not the peak — filling at the peak is
+lookahead bias, since the peak isn't knowable until the window closes).
 `run` is the end-to-end entry point (rows -> engine -> trades); `simulate`
 is the pure trade-arithmetic step, kept separate so it can be unit tested
 without depending on the engine module.
@@ -13,14 +15,16 @@ from polytrage.models import AlignedRow, ArbWindow, BacktestParams, BacktestResu
 
 
 def simulate(windows: Sequence[ArbWindow], params: BacktestParams, n_legs: int) -> BacktestResult:
-    """Simulate one $1-basket trade per window, executed at its peak.
+    """Simulate one $1-basket trade per window, executed at its entry edge.
 
-    gross edge = window.edge (per $1 basket)
+    gross edge = window.entry_edge (per $1 basket) — falls back to the peak
+                 edge only when entry_sum is unset (0.0), for hand-built
+                 ArbWindow objects that predate the entry_sum field.
     net        = gross - params.fee*1.0 - params.slippage*n_legs
     """
     result = BacktestResult(params=params, windows=list(windows))
     for window in windows:
-        gross = window.edge
+        gross = window.entry_edge if window.entry_sum else window.edge
         net = gross - params.fee * 1.0 - params.slippage * n_legs
         result.trades += 1
         result.gross_edge += gross

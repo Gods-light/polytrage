@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import types
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,6 +44,14 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_source_args(p_optimize)
     p_optimize.add_argument("--folds", type=int, default=3, help="walk-forward folds (default: 3)")
     p_optimize.add_argument("--out", default=None, help="write chosen params as JSON to this path")
+    p_optimize.add_argument(
+        "--slippage", type=float, default=None,
+        help=(
+            "override the frozen slippage assumption for this run only "
+            "(what-if/stress-test; every grid candidate uses this one fixed "
+            "value -- it is never searched, per council review)"
+        ),
+    )
     p_optimize.set_defaults(func=_cmd_optimize, _parser=p_optimize)
 
     p_report = sub.add_parser("report", help="read results/*.json and print a leaderboard")
@@ -137,11 +146,29 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
 
     event, series = _load_source(args)
     rows = _align_rows(event, series)
-    result = runner.run(rows, BacktestParams())
+    result = runner.run(rows, _default_backtest_params())
     summary = metrics.summarize([result])
     print(f"# {event.title}\n")
     print(metrics.to_markdown(summary))
     return 0
+
+
+def _default_backtest_params() -> BacktestParams:
+    """BacktestParams for a standalone backtest run.
+
+    params.json (evolve.py's tuned output -- evolve owns writing it, we only
+    read it) wins if present; otherwise costs default to the frozen
+    environment constants shared with the optimizer, not the BacktestParams
+    dataclass defaults, so scan/backtest/optimize/evolve all report numbers
+    under the same cost assumption.
+    """
+    params_path = Path("params.json")
+    if params_path.is_file():
+        return BacktestParams(**json.loads(params_path.read_text()))
+
+    from polytrage.optimize import tuner
+
+    return BacktestParams(fee=tuner.FROZEN_FEE, slippage=tuner.FROZEN_SLIPPAGE)
 
 
 def _cmd_optimize(args: argparse.Namespace) -> int:
@@ -151,12 +178,11 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
     event, series = _load_source(args)
     rows = _align_rows(event, series)
 
-    # Materialized to a list: walk_forward evaluates the grid once per fold,
-    # and a generator would be exhausted after the first pass.
-    param_grid = list(tuner.grid(
-        thresholds=[0.0025, 0.005, 0.0075, 0.01],
-        slippages=[0.0, 0.0005, 0.001, 0.002],
-    ))
+    if args.slippage is None:
+        param_grid = list(tuner.DEFAULT_GRID())
+    else:
+        param_grid = _slippage_override_grid(tuner, args.slippage)
+
     result = tuner.walk_forward(rows, param_grid, folds=args.folds)
     best_params = _extract_best_params(result)
 
@@ -167,6 +193,24 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
         Path(args.out).write_text(json.dumps(best_params, indent=2) + "\n")
         print(f"wrote {args.out}")
     return 0
+
+
+def _slippage_override_grid(tuner: types.ModuleType, slippage: float) -> list[BacktestParams]:
+    """The same detection-param search space as tuner.DEFAULT_GRID(), but
+    every candidate carries `slippage` instead of FROZEN_SLIPPAGE.
+
+    Council ruling: overriding the cost assumption for one deliberate
+    what-if run is fine; letting the optimizer search over it is not (it
+    would always "improve" net_profit by walking slippage toward zero
+    instead of finding a better detection threshold). The axes are read
+    back out of DEFAULT_GRID()'s own output rather than duplicated here, so
+    this can never drift from the canonical grid it's built from.
+    """
+    baseline = list(tuner.DEFAULT_GRID())
+    thresholds = sorted({p.threshold for p in baseline})
+    max_gaps = sorted({p.max_gap_s for p in baseline})
+    min_windows = sorted({p.min_window_minutes for p in baseline})
+    return list(tuner.grid(thresholds, max_gaps, min_windows, slippage=slippage))
 
 
 def _cmd_report(args: argparse.Namespace) -> int:

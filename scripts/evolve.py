@@ -44,10 +44,6 @@ from polytrage.models import (
     Series,
 )
 
-# Modest grid per CONTRACTS.md; fee/max_gap_s/min_window_minutes stay at
-# BacktestParams defaults (which match the fixtures' ground-truth calibration).
-THRESHOLDS = [0.003, 0.005, 0.0075, 0.01, 0.015, 0.02]
-SLIPPAGES = [0.0005, 0.001, 0.002]
 FOLDS = 3
 
 SPORTS_QUERIES = ["World Cup", "NBA", "NFL", "Premier League", "Champions League", "UFC"]
@@ -60,10 +56,13 @@ LEADERBOARD_TOP_N = 20
 
 
 def fresh_grid() -> Iterator[BacktestParams]:
-    """A new grid iterator each call -- tuner.grid()'s Iterator is exhausted
-    after one use (walk_forward() fully materializes it internally), and we
-    call walk_forward once per event."""
-    return tuner.grid(THRESHOLDS, SLIPPAGES)
+    """A new grid iterator each call -- tuner.DEFAULT_GRID()'s Iterator is
+    exhausted after one use (walk_forward() fully materializes it
+    internally), and we call walk_forward once per event. DEFAULT_GRID is
+    the single canonical grid (threshold sweep only; fee/slippage are frozen
+    constants, not search axes) -- cli.py uses the same one so evolve and
+    cli can never diverge on what "the grid" means."""
+    return tuner.DEFAULT_GRID()
 
 
 # ---------------------------------------------------------------- fixtures --

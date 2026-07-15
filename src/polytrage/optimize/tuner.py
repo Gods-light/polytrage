@@ -2,10 +2,20 @@
 against `backtest.runner.run`, and walk-forward (in-sample / out-of-sample)
 validation to check for overfitting. Deterministic -- no randomness.
 
-`grid()` has no dependency on `polytrage.backtest` and works standalone.
-`tune()` and `walk_forward()` import `backtest.runner` lazily, inside the
-function body, so this module still imports cleanly before `backtest`
-exists; only calling them requires it.
+Cost parameters (fee, slippage) are frozen constants, not search axes: an
+optimizer free to walk slippage toward 0 will always report a rosier
+net_profit by lowering its own assumed trading cost rather than by finding a
+genuinely better detection threshold (a Goodhart failure mode -- caught in
+council review). grid()/DEFAULT_GRID() only search detection params
+(threshold, max_gap_s, min_window_minutes); every candidate they emit
+carries the same FROZEN_FEE/FROZEN_SLIPPAGE. DEFAULT_GRID is the single
+canonical grid -- cli and evolve both import it so they can't silently
+diverge on what "the grid" means.
+
+`grid()`/`DEFAULT_GRID()` have no dependency on `polytrage.backtest` and
+work standalone. `tune()` and `walk_forward()` import `backtest.runner`
+lazily, inside the function body, so this module still imports cleanly
+before `backtest` exists; only calling them requires it.
 """
 from __future__ import annotations
 
@@ -15,28 +25,48 @@ from typing import Iterable, Iterator, Sequence
 
 from polytrage.models import AlignedRow, BacktestParams, BacktestResult
 
+FROZEN_FEE: float = 0.0        # venue fact today (Polymarket taker fee is 0)
+FROZEN_SLIPPAGE: float = 0.002  # deliberately pessimistic per-leg haircut vs midpoint
+
+_DEFAULT_THRESHOLDS: tuple[float, ...] = (0.003, 0.005, 0.0075, 0.01, 0.015, 0.02)
+
 
 def grid(
     thresholds: Sequence[float],
-    slippages: Sequence[float] = (0.001,),
     max_gaps: Sequence[int] = (180,),
     min_windows: Sequence[int] = (1,),
+    *,
+    fee: float = FROZEN_FEE,
+    slippage: float = FROZEN_SLIPPAGE,
 ) -> Iterator[BacktestParams]:
-    """Cartesian product of the given axes as BacktestParams instances.
+    """Cartesian product over detection params only (thresholds, max_gaps,
+    min_windows) as BacktestParams instances.
 
-    Iteration order is deterministic: thresholds outermost, min_windows
-    innermost. `fee` is not a search axis here and stays at the
-    BacktestParams default (0.0) for every combination.
+    fee/slippage are NOT search axes -- they're keyword-only scalars applied
+    identically to every combination (default: the frozen constants above),
+    so no grid ever "improves" net_profit by walking costs toward zero.
+    Override them only for a deliberate what-if scenario, never as part of a
+    search sweep. Iteration order is deterministic: thresholds outermost,
+    min_windows innermost.
     """
-    for threshold, slippage, max_gap, min_window in product(
-        thresholds, slippages, max_gaps, min_windows
-    ):
+    for threshold, max_gap, min_window in product(thresholds, max_gaps, min_windows):
         yield BacktestParams(
             threshold=threshold,
+            fee=fee,
             slippage=slippage,
             max_gap_s=max_gap,
             min_window_minutes=min_window,
         )
+
+
+def DEFAULT_GRID() -> Iterator[BacktestParams]:
+    """The single canonical search grid: the documented threshold sweep,
+    every other axis left at grid()'s own defaults (frozen costs included).
+    cli and evolve both call this instead of building their own grid() so
+    they can never disagree on what params were searched. Fresh generator
+    on every call.
+    """
+    return grid(_DEFAULT_THRESHOLDS)
 
 
 def tune(
