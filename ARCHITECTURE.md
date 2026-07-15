@@ -7,8 +7,8 @@
 | `src/polytrage/models.py` | shared contract | Frozen dataclasses every other module imports: `Market`, `Event`, `PricePoint`, `Series`, `AlignedRow`, `ArbWindow`, `BacktestParams`, `BacktestResult`. |
 | `src/polytrage/data/` | data-eng | `gamma.py` (event fetch/search/parse), `clob.py` (price-history fetch/parse), `store.py` (JSON persistence used by the evolve loop). |
 | `src/polytrage/engine/` | arb-eng | `align.py` (align multiple price series to common minutes), `arb.py` (detect long/short arbitrage windows). Pure functions, no I/O. |
-| `src/polytrage/backtest/` | backtest-eng | `runner.py` (simulate one trade per window), `metrics.py` (aggregate results + markdown report). |
-| `src/polytrage/optimize/` | opt-eng | `tuner.py` (grid search + walk-forward validation over `backtest.runner.run`). |
+| `src/polytrage/backtest/` | backtest-eng | `runner.py` (simulate one trade per window, filled at the window's **entry** edge, not its peak), `metrics.py` (aggregate results + markdown report, entry vs. peak side by side). |
+| `src/polytrage/optimize/` | opt-eng | `tuner.py` (grid search + walk-forward validation over `backtest.runner.run`; `fee`/`slippage` are **frozen constants**, not search axes; `DEFAULT_GRID()` is the one canonical grid). |
 | `src/polytrage/cli.py` | cli-eng | argparse entrypoint: `scan` / `backtest` / `optimize` / `report`. |
 | `scripts/evolve.py` | cicd-eng | Nightly self-tuning loop: discover events, backtest, walk-forward re-tune, commit `params.json` on improvement. |
 | `.github/workflows/ci.yml`, `Makefile` | cicd-eng | `test` job (every push/PR) and `evolve` job (scheduled + manual dispatch). |
@@ -47,14 +47,21 @@
                   |  backtest/                            |
                   |   runner.py  : run(rows, params)       |
                   |                -> BacktestResult       |
+                  |                (fills at window.entry_edge,
+                  |                 NOT the peak -- lookahead bias)
                   |   metrics.py : summarize(results) -> dict
+                  |                (gross = entry; peak reported
+                  |                 alongside, ceiling only)
                   |                to_markdown(summary) -> str
                   +--------------------+-------------------+
                                        | BacktestResult
                                        v
                   +--------------------------------------+
                   |  optimize/tuner.py                    |
-                  |   grid(...)         -> Iterator[BacktestParams]
+                  |   FROZEN_FEE, FROZEN_SLIPPAGE  (not search axes)
+                  |   DEFAULT_GRID()    -> Iterator[BacktestParams]
+                  |                        (the one grid; cli + evolve
+                  |                         both import this, not their own)
                   |   tune(rows, grid)  -> (BacktestParams, BacktestResult)
                   |   walk_forward(...) -> dict (in- vs out-of-sample profit)
                   |   [wraps backtest.runner.run once per candidate params]
@@ -111,6 +118,32 @@ the job.
 This matches the fixture's validated ground truth (`threshold=0.005`,
 `max_gap_s=180` → range 0.9425–1.0212) and means a boundary price counts
 as an opportunity instead of being silently excluded.
+
+**Entry-fill, not peak-fill.** `ArbWindow` carries both `entry_sum` /
+`entry_edge` (the qualifying row at detection time, where the window
+starts) and `peak_sum` / `edge` (the most extreme sum observed anywhere
+in the window). `backtest/runner.py`'s `simulate()` computes
+`gross_edge` and `net_profit` from `entry_edge` only; the peak is
+threaded through to `BacktestResult` and reported by
+`metrics.summarize()` as `peak_gross_edge`, a ceiling for context, and
+is never used to compute a profit number. Filling at the peak is
+lookahead bias — it isn't knowable until after the window has already
+closed — a finding from the 2026-07-16 council review
+(`docs/COUNCIL-2026-07-16.md`).
+
+**Frozen trading costs.** `fee` and `slippage` are still real fields on
+`BacktestParams`, so a single `run()` call can be pointed at any cost
+assumption. But `optimize/tuner.py` no longer treats them as search
+axes: `grid()` takes them as keyword-only scalars defaulting to
+`FROZEN_FEE` / `FROZEN_SLIPPAGE`, applied identically to every
+candidate, and `DEFAULT_GRID()` — the one grid definition `cli.py` and
+`evolve.py` both import instead of building their own — only varies
+`threshold`, `max_gap_s`, `min_window_minutes`. An optimizer free to
+search cost downward will always find that lowering its own assumed
+cost raises `net_profit`, indistinguishable from finding a genuinely
+better detection threshold; the same council review caught this by
+pointing at `params.json`'s own history, where `slippage` had already
+walked down to the lowest value ever offered as a candidate.
 
 **Walk-forward to prevent overfit.** `optimize/tuner.py`'s `walk_forward`
 tunes parameters on fold *i* and scores them on fold *i+1* — parameters

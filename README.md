@@ -3,6 +3,17 @@
 Detection, backtesting, and self-tuning of multi-outcome arbitrage on
 Polymarket.
 
+## Status
+
+This is a signal-research and backtesting instrument, not a trading bot
+— it does not place live orders. That's a council decision, not a
+boilerplate disclaimer: a four-voice review on 2026-07-16 found real
+methodology risk (lookahead bias in the backtest fill, a cost parameter
+the optimizer could Goodhart toward zero, a single-event sample) and set
+a 20-30 event bar before any tuning claim gets trusted beyond that. See
+[`docs/COUNCIL-2026-07-16.md`](docs/COUNCIL-2026-07-16.md) for the full
+verdict, what got fixed in code, and what's still open.
+
 ## What it does
 
 Polymarket runs many events as a set of separate binary (YES/NO) markets
@@ -25,10 +36,11 @@ The outcomes are quoted independently and don't always agree:
 polytrage fetches event and price-history data from Polymarket's public
 APIs, finds these windows historically, backtests a one-basket-per-window
 strategy against them, and runs a walk-forward optimizer to tune the
-detection parameters (threshold, slippage, gap-merging, minimum window
-length). A nightly CI job re-runs the optimizer against newly-closed
-events and commits new parameters only when they hold up on data the
-tuner didn't see.
+detection parameters (threshold, gap-merging, minimum window length).
+Trading costs (fee, slippage) are frozen pessimistic constants, not
+something the optimizer is allowed to search — see Status. A nightly CI
+job re-runs the optimizer against newly-closed events and commits new
+parameters only when they hold up on data the tuner didn't see.
 
 ## Install
 
@@ -79,34 +91,51 @@ market for this match, from event creation (Jul 12, 10:05 UTC) through
 close (Jul 15, 21:21 UTC — final score England 1–2 Argentina: Gordon 55′,
 Fernández 85′, Martínez 90+′).
 
-Running `polytrage backtest --fixtures` with default parameters
-(`threshold=0.005`, `max_gap_s=180`) against the 4,993 minutes where all
-three price series align:
+`polytrage backtest` fills each detected window at its **entry** price —
+the edge at the first qualifying minute, i.e. what a strategy watching
+the market in real time could actually have acted on — not its peak.
+Filling at the peak is lookahead bias: the peak isn't knowable until
+after the window has already closed. The peak is still reported
+alongside it, labeled as a theoretical ceiling, so the size of that gap
+stays visible instead of being quietly assumed away (council finding a,
+`docs/COUNCIL-2026-07-16.md`). Costs are frozen at $0/leg fee and
+$0.002/leg slippage — pessimistic constants, not values the optimizer is
+allowed to search down (finding b).
+
+This is `make backtest`'s literal current output, over the 4,993 minutes
+where all three price series align (`threshold=0.005`, `max_gap_s=180s`):
 
 | Metric | Value |
 |---|---|
 | sum(YES) range | $0.9425 – $1.0212 |
-| Long windows (sum ≤ $0.995) | ~10 |
-| Short windows (sum ≥ $1.005) | ~15 |
-| Best edge | 5.75¢ per $1 basket |
-| Best edge duration | 12 minutes |
-| Best edge timing | starting right after Fernández's 85′ equalizer |
-| Longest window | ~5.25 hours, pre-match on game day |
+| Trades (windows) | 26 (11 long, 15 short) |
+| Gross edge — executed (entry-fill) | $0.2450 |
+| Gross edge — theoretical max (peak-fill) | $0.2913 |
+| Net profit (after frozen fee + slippage) | $0.0890 |
+| Profit / trade | $0.0034 |
+| Arb minutes | 1,393 |
 
-The best edge appears in the minutes after the 85′ equalizer: with the
-score tied late and all three outcomes (England win / draw / Argentina
-win) simultaneously live, the three independently-quoted YES prices
-summed to $0.9425 — 5.75¢ below fair value. A $0.9425 basket (one YES
+The single best trade is unaffected by the entry-vs-peak distinction: a
+5.75¢-per-basket long window running 20:46–20:57 UTC, right after
+Fernández's 85′ equalizer. With the score tied late and all three
+outcomes (England win / draw / Argentina win) simultaneously live, the
+three independently-quoted YES prices opened that window already at
+their most extreme — $0.9425 — and never moved further, so entry edge
+and peak edge are identical (5.75¢ both). A $0.9425 basket (one YES
 share of each outcome) was guaranteed to redeem for $1.00 once the match
 finished, regardless of the eventual winner.
 
-The longest-lived opportunity was a ~5.25-hour short window earlier on
-game day, before kickoff, where the three YES prices held persistently at
-or above $1.005 — the mirror trade, holding a NO basket, would have
-redeemed for more than it cost.
+Not every window is that clean. The longest-lived opportunity — a short
+window from 12:45 to 17:59 UTC on game day, before kickoff, where the
+three YES prices held persistently at or above $1.005 — shows exactly
+the gap the entry-fill fix exists to close: 0.63¢ captured at entry
+versus 1.12¢ at that window's eventual peak. Reporting the peak number
+there would have overstated what an entry-time strategy could actually
+have captured.
 
-These are backtested numbers against midpoint price history, not a claim
-of realized trading profit — see Caveats.
+These are backtested numbers against midpoint price history from a
+single event, not a claim of realized trading profit — see Caveats and
+Status.
 
 ## The evolve loop
 
